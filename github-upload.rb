@@ -158,9 +158,15 @@ OptionParser.new do |opts|
     $options[:token] = arg_token
   end
   
+  opts.on("--get-token",
+      "Prints out the current value of the API token, generating it if needed. It then exits the script without uploading anything. Can be used with the '--username' and '--password' flags.") do
+    $options[:get_token] = true
+  end
+  
   opts.on("--reset-token",
       "Reset the GitHub API token, forcing you to re-enter your GitHub user information.") do
-    $options[:reset_token] = true
+    # NOTICE: Option name here is "generate_token" not "reset_token"!
+    $options[:generate_token] = true
   end
   
   opts.on("--skip-ssl-verification",
@@ -178,32 +184,26 @@ end.parse!
 
 
 
-# Configuration and setup
-# -----------------------
-
-# The file we want to upload, and repo where to upload it to.
-die("Please specify a file to upload.") if ARGV.length < 1
-file = Pathname.new(ARGV[0])
-repo = ARGV[1] || `git config --get remote.origin.url`.match(/git@github.com:(.+?)\.git/)[1]
-
-file_name =        $options[:file_name] || file.basename.to_s
-file_description = $options[:file_description] || ""
-
-
-# The actual, hard work
+# Get API Token (generating one if neccessary)
 # ---------------------
 
-# Get Oauth token for this script.
-$options[:token] = `git config --get github.upload-script-token`.chomp unless $options[:token]
 
-if (!$options[:reset_token]) && ($options[:username] || $options[:password]) then
+# User a username/password combination rather than a token. Will not store the token when it is done.
+if (!$options[:reset_token] && !$options[:token]) && ($options[:username] || $options[:password]) then
 
   die "Please specify both a username and password, or use the --reset-token flag." if !($options[:username] && $options[:password])
 
   # Generate a temporary token, but don't store it to their git config
   $options[:token] = request_api_token($options[:username], $options[:password])
+end
 
-elsif $options[:reset_token] || !$options[:token] then
+# Get Oauth token for this script.
+$options[:token] = `git config --get github.upload-script-token`.chomp unless $options[:token]
+$options[:generate_token] = true if !$options[:token]
+
+
+# Generate a new token, and store it to `git config`
+if $options[:generate_token] then
 
   if (!$options[:username] || !$options[:password]) then
     # Don't display the message if they have aleady given both parameters
@@ -221,11 +221,33 @@ elsif $options[:reset_token] || !$options[:token] then
   puts "Sucessfully generated new token."
 
 end
-#curl -X POST -u #{gh_user}:#{gh_password}
 
+
+# Only print out the API key. Don't actually upload a file.
+if $options[:get_token] then
+  puts "GitHub API Token: "+$options[:token]
+  exit 0
+end
+
+
+
+# Configuration and setup
+# -----------------------
+
+# The file we want to upload, and repo where to upload it to.
+die("Please specify a file to upload.") if ARGV.length < 1
+file = Pathname.new(ARGV[0])
+repo = ARGV[1] || `git config --get remote.origin.url`.match(/git@github.com:(.+?)\.git/)[1]
+
+file_name =        $options[:file_name] || file.basename.to_s
+file_description = $options[:file_description] || ""
+
+
+
+# Delete the file if it already exists on the server
 if $options[:force_upload] then
 
-  # Make sure the file doesn't already exist
+  # Get a list of all files in the 'downloads' section
   res = get("https://api.github.com/repos/#{repo}/downloads", $options[:token])
   info = JSON.parse(res.body)
   info.each do |remote_file|
@@ -248,7 +270,7 @@ res = post("https://api.github.com/repos/#{repo}/downloads", $options[:token], {
   'content_type' => file.type.gsub(/;.*/, '')
 }.to_json, {})
 
-die("File already exists named '#{file_name}'.") if res.class == Net::HTTPClientError
+die("File already exists named '#{file_name}'. Use the '--force' key if you want to replace it.") if res.class == Net::HTTPClientError
 die("GitHub doesn't want us to upload the file.") unless res.class == Net::HTTPCreated
 
 
