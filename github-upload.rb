@@ -52,6 +52,13 @@ def post(url, token, params, headers)
   return get_http_request(uri, token, req, params)
 end
 
+def post_basic_auth(url, username, password, params, headers)
+  uri = URI.parse(url)
+  req = Net::HTTP::Post.new(uri.path, headers)
+  req.basic_auth username, password
+  return get_http_request(uri, nil, req, params)
+end
+
 def delete(url, token)
   uri = URI.parse(url)
   req = Net::HTTP::Delete.new(uri.path)
@@ -120,6 +127,11 @@ OptionParser.new do |opts|
     $options[:token] = arg_token
   end
   
+  opts.on("--reset-token",
+      "Reset the GitHub API token, forcing you to re-enter your GitHub user information.") do
+    $options[:reset_token] = true
+  end
+  
   opts.on("--skip-ssl-verification",
       "Skip SSL Verification in the HTTP Request.") do
     $options[:skip_ssl_verification] = true
@@ -153,6 +165,32 @@ file_description = $options[:file_description] || ""
 # Get Oauth token for this script.
 $options[:token] = `git config --get github.upload-script-token`.chomp unless $options[:token]
 
+
+if $options[:reset_token] || !$options[:token]
+
+  puts "To upload a file to GitHub, you need to generate a token. This only needs to be done once, and requires your GitHub username and password. The private data will not be stored after it is used."
+  
+  puts "Please enter your GitHub username:"
+  username = STDIN.gets.chomp
+  die "Invalid username. Cancelling" if username == ""
+  
+  puts "Please enter your GitHub password:"
+  password = STDIN.gets.chomp
+  die "Invalid password. Cancelling" if password == ""
+
+  res = post_basic_auth("https://api.github.com/authorizations", username, password, 
+    { 'note' => "file upload script", 'scopes' => ["repo"] }.to_json, {})
+  info = JSON.parse(res.body)
+  
+  token = info["token"]
+  # Store the token so users don't have to keep re-entering their login information
+  `git config --global github.upload-script-token #{token}`
+  $options[:token] = token
+  
+  puts "Sucessfully generated new token."
+
+end
+#curl -X POST -u #{gh_user}:#{gh_password}
 
 if $options[:force_upload]
 
