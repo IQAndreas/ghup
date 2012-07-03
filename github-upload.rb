@@ -59,6 +59,15 @@ def post_basic_auth(url, username, password, params, headers)
   return get_http_request(uri, nil, req, params)
 end
 
+def request_api_token(username, password)
+  res = post_basic_auth("https://api.github.com/authorizations", username, password, 
+    { 'note' => "file upload script", 'scopes' => ["repo"] }.to_json, {})
+  die "Invalid username or password." if res.class == Net::HTTPUnauthorized
+  
+  info = JSON.parse(res.body)
+  return info["token"]
+end
+
 def delete(url, token)
   uri = URI.parse(url)
   req = Net::HTTP::Delete.new(uri.path)
@@ -177,13 +186,9 @@ if $options[:reset_token] || !$options[:token]
   puts "Please enter your GitHub password:"
   password = STDIN.gets.chomp
   die "Invalid password. Cancelling" if password == ""
-
-  res = post_basic_auth("https://api.github.com/authorizations", username, password, 
-    { 'note' => "file upload script", 'scopes' => ["repo"] }.to_json, {})
-  info = JSON.parse(res.body)
   
-  token = info["token"]
   # Store the token so users don't have to keep re-entering their login information
+  token = request_api_token(username, password)
   `git config --global github.upload-script-token #{token}`
   $options[:token] = token
   
