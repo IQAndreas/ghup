@@ -31,6 +31,13 @@ end
 # Helpers
 # -------
 
+def get_input(message, error_message)
+  puts message
+  result = STDIN.gets.chomp
+  die error_message if result == ""
+  return result
+end
+
 def get_http_request(uri, token, request, params = "")
   http = Net::HTTP.new(uri.host, uri.port)
   http.use_ssl = true
@@ -136,6 +143,21 @@ OptionParser.new do |opts|
     $options[:token] = arg_token
   end
   
+  opts.on("-u", "--username [USERNAME]",
+      "Manually specify a GitHub username to use. If used without '--reset-token', it will not store an API key or any other information.") do |arg_username|
+    $options[:username] = arg_username
+  end
+  
+  opts.on("-p", "--password [PASSWORD]",
+      "Manually specify a GitHub password to use. See '--username' for usage.") do |arg_password|
+    $options[:password] = arg_password
+  end
+  
+  opts.on("-t", "--token [TOKEN]",
+      "Manually specify a GitHub API token. Useful if you want to temporarily upload a file under a different GitHub account.") do |arg_token|
+    $options[:token] = arg_token
+  end
+  
   opts.on("--reset-token",
       "Reset the GitHub API token, forcing you to re-enter your GitHub user information.") do
     $options[:reset_token] = true
@@ -174,18 +196,22 @@ file_description = $options[:file_description] || ""
 # Get Oauth token for this script.
 $options[:token] = `git config --get github.upload-script-token`.chomp unless $options[:token]
 
+if (!$options[:reset_token]) && ($options[:username] || $options[:password]) then
 
-if $options[:reset_token] || !$options[:token]
+  die "Please specify both a username and password, or use the --reset-token flag." if !($options[:username] && $options[:password])
 
-  puts "To upload a file to GitHub, you need to generate a token. This only needs to be done once, and requires your GitHub username and password. The private data will not be stored after it is used."
+  # Generate a temporary token, but don't store it to their git config
+  $options[:token] = request_api_token($options[:username], $options[:password])
+
+elsif $options[:reset_token] || !$options[:token] then
+
+  if (!$options[:username] || !$options[:password]) then
+    # Don't display the message if they have aleady given both parameters
+    puts "To upload a file to GitHub, you need to generate a token. This only needs to be done once, and requires your GitHub username and password. The private data will not be stored after it is used."
+  end
   
-  puts "Please enter your GitHub username:"
-  username = STDIN.gets.chomp
-  die "Invalid username. Cancelling" if username == ""
-  
-  puts "Please enter your GitHub password:"
-  password = STDIN.gets.chomp
-  die "Invalid password. Cancelling" if password == ""
+  username = $options[:username] || get_input("Please enter your GitHub username:", "Invalid username. Cancelling.")
+  password = $options[:password] || get_input("Please enter your GitHub password:", "Invalid password. Cancelling.")
   
   # Store the token so users don't have to keep re-entering their login information
   token = request_api_token(username, password)
@@ -197,7 +223,7 @@ if $options[:reset_token] || !$options[:token]
 end
 #curl -X POST -u #{gh_user}:#{gh_password}
 
-if $options[:force_upload]
+if $options[:force_upload] then
 
   # Make sure the file doesn't already exist
   res = get("https://api.github.com/repos/#{repo}/downloads", $options[:token])
